@@ -19,7 +19,8 @@ tool are built against these exactly.
 | `Notes`              | Long text                              | Free text from the slate or AD.                                       |
 | `Logged At`          | Created time                           | Automatic. This is the chronological key used to match rows to files. |
 | `Logged By`          | Single line text                       | Optional — who tapped it in.                                          |
-| `Sync Sound`         | Checkbox                               | Not currently used by the tooling.                                    |
+| `Media`              | Single select (`Just Video`/`Just Audio`/`Sync Sound`) | Set by the logger's 3-button toggle (Video/Audio/Sync Sound), defaults to `Just Video`. |
+| `Sync Sound`         | Checkbox                               | Not written by the logger (that's `Media` now). The DIT tool's web UI checks this automatically when a batch rename produces both a footage file and an audio file sharing the same basename — see [dit-tool/README.md](dit-tool/README.md#linking-renamed-files-back-to-airtable). |
 | `Source`             | Single select (`Live logged`/`Ingested`) | Set by the DIT tool's web UI after a rename: `Live logged` if the AD already logged this take and the row existed, `Ingested` if the row was created after the fact from a renamed file with no prior log entry. |
 
 ## Naming source fields

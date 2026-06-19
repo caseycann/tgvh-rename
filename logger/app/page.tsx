@@ -12,9 +12,15 @@ type RecentTake = {
   Shot?: string;
   Take?: number;
   "Flagged Take"?: boolean;
-  "Sync Sound"?: boolean;
+  Media?: string;
   Status?: string;
 };
+
+const MEDIA_OPTIONS = [
+  { label: "Video", value: "Just Video" },
+  { label: "Audio", value: "Just Audio" },
+  { label: "Sync Sound", value: "Sync Sound" },
+];
 
 function todayLocal(): string {
   const d = new Date();
@@ -31,7 +37,7 @@ export default function Page() {
   const [shot, setShot] = useState("1");
   const [take, setTake] = useState("1");
   const [flaggedTake, setFlaggedTake] = useState(false);
-  const [syncSound, setSyncSound] = useState(false);
+  const [media, setMedia] = useState(MEDIA_OPTIONS[0].value);
   const [status, setStatus] = useState("");
   const [notes, setNotes] = useState("");
   const [loggedBy, setLoggedBy] = useState("");
@@ -101,7 +107,7 @@ export default function Page() {
           shot,
           take,
           flaggedTake,
-          syncSound,
+          media,
           status: status || undefined,
           notes: notes || undefined,
           loggedBy: loggedBy || undefined,
@@ -196,13 +202,20 @@ export default function Page() {
           Flagged take (circle this one)
         </label>
 
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={syncSound}
-            onChange={(e) => setSyncSound(e.target.checked)}
-          />
-          Sync sound
+        <label>
+          Media
+          <div className="media-toggle">
+            {MEDIA_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={media === opt.value ? "active" : ""}
+                onClick={() => setMedia(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </label>
 
         <label>

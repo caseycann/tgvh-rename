@@ -72,6 +72,27 @@ textarea {
   padding: 0;
 }
 
+.media-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.media-toggle button {
+  flex: 1;
+  margin-top: 0;
+  padding: 12px;
+  font-size: 0.95rem;
+  background: #1c1c1c;
+  border: 1px solid #333;
+  color: #ccc;
+}
+
+.media-toggle button.active {
+  background: #e0463f;
+  border-color: #e0463f;
+  color: white;
+}
+
 button {
   font-size: 1.1rem;
   padding: 16px;
