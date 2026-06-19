@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DIT Rename Tool</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #111;
+    color: #f5f5f5;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .subtitle { color: #999; font-size: 0.9rem; margin-bottom: 24px; }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; color: #ccc; margin-bottom: 12px; }
+  input, select, textarea {
+    font-size: 1.05rem; padding: 10px; border-radius: 8px; border: 1px solid #333;
+    background: #1c1c1c; color: #f5f5f5;
+  }
+  button {
+    font-size: 1rem; padding: 12px 16px; border-radius: 8px; border: none;
+    background: #e0463f; color: white; font-weight: 600; cursor: pointer; margin-right: 8px;
+  }
+  button.secondary { background: #333; }
+  button:disabled { background: #555; cursor: default; }
+  .mode-tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+  .mode-tabs button { flex: 1; background: #222; }
+  .mode-tabs button.active { background: #e0463f; }
+  .row { display: flex; gap: 12px; }
+  .row > label { flex: 1; }
+  section { display: none; }
+  section.active { display: block; }
+  .panel { background: #1a1a1a; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .status-line { font-size: 0.9rem; color: #999; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #333; }
+  td input, td select { width: 100%; padding: 6px; font-size: 0.85rem; }
+  .warning { color: #ffb84d; font-size: 0.85rem; margin: 4px 0; }
+  .error { color: #ff6b6b; font-size: 0.9rem; margin: 8px 0; }
+  .ok { color: #6bcf6b; }
+  .rename-line { font-family: monospace; font-size: 0.85rem; padding: 2px 0; }
+  .skipped { color: #888; text-decoration: line-through; }
+  .raw-transcript { font-size: 0.75rem; color: #888; font-style: italic; }
+</style>
+</head>
+<body>
+<main>
+  <h1>DIT Rename Tool</h1>
+  <p class="subtitle">Renames footage/audio for a shoot day. Nothing is ever uploaded — this all runs on this machine.</p>
+
+  <label>
+    Date folder path
+    <input type="text" id="rootPath" placeholder="/path/to/20260619">
+  </label>
+  <button class="secondary" onclick="checkFolder()">Load folder</button>
+  <div id="folderStatus" class="status-line"></div>
+
+  <div class="mode-tabs">
+    <button id="tab-live" class="active" onclick="setMode('live')">Live (one take)</button>
+    <button id="tab-pull" onclick="setMode('pull')">Pull from Airtable</button>
+    <button id="tab-batch" onclick="setMode('batch')">Batch / Slate scrub</button>
+  </div>
+
+  <section id="section-live" class="active">
+    <div class="panel">
+      <p class="status-line" id="liveContext">Load a folder above to see the most recent footage/audio file.</p>
+      <label>Location
+        <select id="liveLocation"></select>
+      </label>
+      <label>Scene
+        <select id="liveScene"></select>
+      </label>
+      <div class="row">
+        <label>Shot <input type="number" id="liveShot" min="1" value="1"></label>
+        <label>Take <input type="number" id="liveTake" min="1" value="1"></label>
+      </div>
+      <button onclick="previewLive()">Preview rename</button>
+    </div>
+    <div id="liveResult"></div>
+  </section>
+
+  <section id="section-pull">
+    <div class="panel">
+      <p class="status-line">Fetches every take logged to Airtable for this folder's date, pairs them to files in chronological order, and previews the rename.</p>
+      <button onclick="previewPull()">Fetch from Airtable</button>
+    </div>
+    <div id="pullResult"></div>
+  </section>
+
+  <section id="section-batch">
+    <div class="panel">
+      <p class="status-line">For days with no Airtable logging. Loads every file in Footage/Audio into an editable table. Use "Suggest from slate" to auto-fill scene/shot/take by scrubbing the first few seconds of audio for spoken slate info — always review before confirming, this is a best-effort guess.</p>
+      <button onclick="loadBatch()">Load files</button>
+    </div>
+    <div id="batchTableWrap"></div>
+  </section>
+</main>
+
+<script>
+let currentMode = 'live';
+let options = { locations: [], scenes: [] };
+
+function setMode(mode) {
+  currentMode = mode;
+  for (const m of ['live', 'pull', 'batch']) {
+    document.getElementById('tab-' + m).classList.toggle('active', m === mode);
+    document.getElementById('section-' + m).classList.toggle('active', m === mode);
+  }
+}
+
+function getRoot() {
+  return document.getElementById('rootPath').value.trim();
+}
+
+async function loadOptions() {
+  try {
+    const res = await fetch('/api/options');
+    const data = await res.json();
+    if (res.ok) {
+      options = data;
+      fillSelect('liveLocation', options.locations, 'Select location…');
+      fillSelect('liveScene', options.scenes, 'Select scene…');
+    }
+  } catch (e) { /* Airtable may not be configured; live/batch can still work for footage-only flows */ }
+}
+
+function fillSelect(id, items, placeholder) {
+  const el = document.getElementById(id);
+  el.innerHTML = '<option value="" disabled selected>' + placeholder + '</option>' +
+    items.map(i => `<option value="${i.id}" data-label="${i.label}">${i.label}</option>`).join('');
+}
+
+async function checkFolder() {
+  const root = getRoot();
+  const statusEl = document.getElementById('folderStatus');
+  statusEl.textContent = 'Loading…';
+  statusEl.className = 'status-line';
+  try {
+    const res = await fetch('/api/folder-status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root}) });
+    const data = await res.json();
+    if (!res.ok) {
+      statusEl.textContent = data.error;
+      statusEl.className = 'error';
+      return;
+    }
+    statusEl.textContent = `${data.footage_count} footage file(s), ${data.audio_count} audio file(s)` + (data.date_iso ? ` — date ${data.date_iso}` : ' — folder name is not YYYYMMDD, pull mode unavailable');
+    refreshLiveContext();
+  } catch (e) {
+    statusEl.textContent = String(e);
+    statusEl.className = 'error';
+  }
+}
+
+async function refreshLiveContext() {
+  const root = getRoot();
+  const el = document.getElementById('liveContext');
+  try {
+    const res = await fetch('/api/live/context', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root}) });
+    const data = await res.json();
+    if (!res.ok) { el.textContent = data.error; return; }
+    el.textContent = `Most recent footage: ${data.footage_file ?? '(none)'} | Most recent audio: ${data.audio_file ?? '(none)'}`;
+  } catch (e) { el.textContent = String(e); }
+}
+
+function renderRenameList(containerId, renames, warnings, onConfirm) {
+  const el = document.getElementById(containerId);
+  let html = '';
+  for (const w of (warnings || [])) html += `<div class="warning">⚠ ${w}</div>`;
+  if (!renames.length) {
+    html += '<p class="status-line">Nothing to rename.</p>';
+    el.innerHTML = html;
+    return;
+  }
+  html += '<div class="panel">';
+  for (const r of renames) {
+    html += `<div class="rename-line">${r.original.split('/').pop()} &rarr; ${r.new_name}</div>`;
+  }
+  html += `<button id="confirmBtn-${containerId}" onclick="(${onConfirm})()">Confirm &amp; rename</button>`;
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+async function previewLive() {
+  const root = getRoot();
+  const locationSel = document.getElementById('liveLocation');
+  const sceneSel = document.getElementById('liveScene');
+  const location = locationSel.selectedOptions[0]?.dataset.label || '';
+  const scene = sceneSel.selectedOptions[0]?.dataset.label || '';
+  const shot = document.getElementById('liveShot').value;
+  const take = document.getElementById('liveTake').value;
+
+  const res = await fetch('/api/live/preview', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, location, scene, shot, take}) });
+  const data = await res.json();
+  if (!res.ok) { document.getElementById('liveResult').innerHTML = `<div class="error">${data.error}</div>`; return; }
+  window._liveRenames = data.renames;
+  renderRenameList('liveResult', data.renames, data.notes, 'confirmExecute("live", "liveResult", window._liveRenames)');
+}
+
+async function previewPull() {
+  const root = getRoot();
+  const res = await fetch('/api/pull/preview', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root}) });
+  const data = await res.json();
+  if (!res.ok) { document.getElementById('pullResult').innerHTML = `<div class="error">${data.error}</div>`; return; }
+  window._pullRenames = data.renames;
+  const warnings = [`Found ${data.take_count} logged take(s).`, ...data.warnings];
+  renderRenameList('pullResult', data.renames, warnings, 'confirmExecute("pull", "pullResult", window._pullRenames)');
+}
+
+let batchRows = [];
+
+async function loadBatch() {
+  const root = getRoot();
+  const res = await fetch('/api/batch/template', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root}) });
+  const data = await res.json();
+  if (!res.ok) { document.getElementById('batchTableWrap').innerHTML = `<div class="error">${data.error}</div>`; return; }
+  batchRows = data.rows;
+  renderBatchTable();
+}
+
+function renderBatchTable() {
+  const locOpts = options.locations.map(l => `<option value="${l.label}">${l.label}</option>`).join('');
+  const sceneOpts = options.scenes.map(s => `<option value="${s.label}">${s.label}</option>`).join('');
+  let html = '<table><tr><th>File</th><th>Location</th><th>Scene</th><th>Shot</th><th>Take</th><th></th></tr>';
+  batchRows.forEach((row, i) => {
+    html += `<tr>
+      <td>${row.original_path.split('/').pop()}<div class="raw-transcript" id="transcript-${i}"></div></td>
+      <td><select onchange="batchRows[${i}].location=this.value">
+        <option value="">—</option>${locOpts}
+      </select></td>
+      <td><select onchange="batchRows[${i}].scene=this.value">
+        <option value="">—</option>${sceneOpts}
+      </select></td>
+      <td><input value="${row.shot}" onchange="batchRows[${i}].shot=this.value"></td>
+      <td><input value="${row.take}" onchange="batchRows[${i}].take=this.value"></td>
+      <td><button class="secondary" onclick="suggestFromSlate(${i})">Suggest from slate</button></td>
+    </tr>`;
+  });
+  html += '</table>';
+  html += '<button onclick="previewBatch()" style="margin-top:12px">Preview renames</button>';
+  document.getElementById('batchTableWrap').innerHTML = html;
+  // Re-select dropdown values that were already set (e.g. after a slate suggestion)
+  batchRows.forEach((row, i) => {
+    const tr = document.querySelectorAll('#batchTableWrap table tr')[i + 1];
+    if (!tr) return;
+    const [locSel, sceneSel] = tr.querySelectorAll('select');
+    if (row.location) locSel.value = row.location;
+    if (row.scene) sceneSel.value = row.scene;
+  });
+}
+
+async function suggestFromSlate(i) {
+  const root = getRoot();
+  const row = batchRows[i];
+  const transcriptEl = document.getElementById(`transcript-${i}`);
+  transcriptEl.textContent = 'Scrubbing audio…';
+  try {
+    const res = await fetch('/api/transcribe', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, relative_path: row.original_path}) });
+    const data = await res.json();
+    if (!res.ok) { transcriptEl.textContent = 'Error: ' + data.error; return; }
+    if (data.scene) row.scene = data.scene;
+    if (data.shot) row.shot = data.shot;
+    if (data.take) row.take = data.take;
+    transcriptEl.textContent = `Heard: "${data.raw_transcript}"`;
+    renderBatchTable();
+  } catch (e) {
+    transcriptEl.textContent = 'Error: ' + e;
+  }
+}
+
+async function previewBatch() {
+  const root = getRoot();
+  const res = await fetch('/api/batch/preview', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, rows: batchRows}) });
+  const data = await res.json();
+  if (!res.ok) { document.getElementById('batchTableWrap').innerHTML += `<div class="error">${data.error}</div>`; return; }
+  window._batchRenames = data.renames;
+  const resultEl = document.createElement('div');
+  resultEl.id = 'batchResult';
+  document.getElementById('batchTableWrap').appendChild(resultEl);
+  renderRenameList('batchResult', data.renames, data.warnings, 'confirmExecute("batch", "batchResult", window._batchRenames)');
+}
+
+async function confirmExecute(mode, containerId, renames) {
+  const root = getRoot();
+  const res = await fetch('/api/execute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, mode, renames}) });
+  const data = await res.json();
+  const el = document.getElementById(containerId);
+  if (!res.ok) { el.innerHTML += `<div class="error">${data.error}</div>`; return; }
+  let html = '<div class="panel">';
+  let successCount = 0;
+  for (const r of data.results) {
+    if (r.success) successCount++;
+    html += `<div class="rename-line ${r.success ? '' : 'skipped'}">${r.message}</div>`;
+  }
+  html += `<p class="${successCount === data.results.length ? 'ok' : 'warning'}">${successCount}/${data.results.length} files renamed.</p>`;
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+loadOptions();
+</script>
+</body>
+</html>

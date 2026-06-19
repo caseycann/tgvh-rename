@@ -1,2 +1,5 @@
 .claude/
 .vercel
+dit-tool/.venv
+__pycache__/
+*.pyc
