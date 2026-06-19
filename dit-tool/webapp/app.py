@@ -218,11 +218,50 @@ def execute_route():
     mode = body.get("mode", "unknown")
     pairs = [(Path(item["original"]), Path(item["original"]).parent / item["new_name"]) for item in body.get("renames", [])]
     results = core.execute_renames(root, pairs, mode)
+
+    airtable_sync = []
+    if mode == "batch" and AIRTABLE_API_KEY and AIRTABLE_BASE_ID:
+        rows_by_original = {}
+        for row in body.get("rows", []):
+            try:
+                rows_by_original[str(Path(row["original_path"]))] = row
+            except (KeyError, TypeError):
+                continue
+
+        try:
+            date_iso = core.folder_date_to_iso(root)
+        except core.RenameToolError:
+            date_iso = None
+
+        seen_basenames = set()
+        for original, new, success, _message in results:
+            if not success:
+                continue
+            basename = new.stem
+            if basename in seen_basenames:
+                continue
+            seen_basenames.add(basename)
+
+            row = rows_by_original.get(str(original.relative_to(root)))
+            sync_result = core.sync_take_to_airtable(
+                basename,
+                date_iso,
+                (row or {}).get("locationId"),
+                (row or {}).get("sceneId"),
+                (row or {}).get("shot"),
+                (row or {}).get("take"),
+                AIRTABLE_API_KEY,
+                AIRTABLE_BASE_ID,
+                AIRTABLE_TABLE_NAME,
+            )
+            airtable_sync.append(sync_result)
+
     return jsonify({
         "results": [
             {"original": str(o), "new": str(n), "success": s, "message": m}
             for o, n, s, m in results
-        ]
+        ],
+        "airtable_sync": airtable_sync,
     })
 
 

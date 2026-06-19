@@ -58,13 +58,18 @@
   <button class="secondary" onclick="checkFolder()">Load folder</button>
   <div id="folderStatus" class="status-line"></div>
 
+  <!--
+    Live (one take) and Pull from Airtable modes are hidden per request —
+    the slate-transcription batch flow covers the actual workflow better.
+    Code/routes for both are left intact below in case we want them back;
+    just re-add the two buttons here (and move class="active" off
+    tab-batch back onto tab-live) to bring them back into the UI.
+  -->
   <div class="mode-tabs">
-    <button id="tab-live" class="active" onclick="setMode('live')">Live (one take)</button>
-    <button id="tab-pull" onclick="setMode('pull')">Pull from Airtable</button>
-    <button id="tab-batch" onclick="setMode('batch')">Batch / Slate scrub</button>
+    <button id="tab-batch" class="active" onclick="setMode('batch')">Batch / Slate scrub</button>
   </div>
 
-  <section id="section-live" class="active">
+  <section id="section-live">
     <div class="panel">
       <p class="status-line" id="liveContext">Load a folder above to see the most recent footage/audio file.</p>
       <label>Location
@@ -90,7 +95,7 @@
     <div id="pullResult"></div>
   </section>
 
-  <section id="section-batch">
+  <section id="section-batch" class="active">
     <div class="panel">
       <p class="status-line">For days with no Airtable logging. Loads every file in Footage/Audio into an editable table. Use "Suggest from slate" to auto-fill scene/shot/take by scrubbing the first few seconds of audio for spoken slate info — always review before confirming, this is a best-effort guess.</p>
       <button onclick="loadBatch()">Load files</button>
@@ -101,14 +106,14 @@
 </main>
 
 <script>
-let currentMode = 'live';
+let currentMode = 'batch';
 let options = { locations: [], scenes: [] };
 
 function setMode(mode) {
   currentMode = mode;
   for (const m of ['live', 'pull', 'batch']) {
-    document.getElementById('tab-' + m).classList.toggle('active', m === mode);
-    document.getElementById('section-' + m).classList.toggle('active', m === mode);
+    document.getElementById('tab-' + m)?.classList.toggle('active', m === mode);
+    document.getElementById('section-' + m)?.classList.toggle('active', m === mode);
   }
 }
 
@@ -226,17 +231,33 @@ async function loadBatch() {
   renderBatchTable();
 }
 
+function setBatchField(i, kind, selectEl) {
+  const opt = selectEl.selectedOptions[0];
+  const label = opt?.dataset.label || '';
+  if (kind === 'location') {
+    batchRows[i].locationId = selectEl.value || '';
+    batchRows[i].location = label;
+  } else if (kind === 'scene') {
+    batchRows[i].sceneId = selectEl.value || '';
+    batchRows[i].scene = label;
+  }
+}
+
+function findOptionByLabel(list, label) {
+  return list.find(o => o.label === label);
+}
+
 function renderBatchTable() {
-  const locOpts = options.locations.map(l => `<option value="${l.label}">${l.label}</option>`).join('');
-  const sceneOpts = options.scenes.map(s => `<option value="${s.label}">${s.label}</option>`).join('');
+  const locOpts = options.locations.map(l => `<option value="${l.id}" data-label="${l.label}">${l.label}</option>`).join('');
+  const sceneOpts = options.scenes.map(s => `<option value="${s.id}" data-label="${s.label}">${s.label}</option>`).join('');
   let html = '<table><tr><th>File</th><th>Location</th><th>Scene</th><th>Shot</th><th>Take</th><th></th></tr>';
   batchRows.forEach((row, i) => {
     html += `<tr>
       <td>${row.original_path.split('/').pop()}<div class="raw-transcript" id="transcript-${i}"></div></td>
-      <td><select onchange="batchRows[${i}].location=this.value">
+      <td><select onchange="setBatchField(${i}, 'location', this)">
         <option value="">—</option>${locOpts}
       </select></td>
-      <td><select onchange="batchRows[${i}].scene=this.value">
+      <td><select onchange="setBatchField(${i}, 'scene', this)">
         <option value="">—</option>${sceneOpts}
       </select></td>
       <td><input value="${row.shot}" onchange="batchRows[${i}].shot=this.value"></td>
@@ -252,8 +273,8 @@ function renderBatchTable() {
     const tr = document.querySelectorAll('#batchTableWrap table tr')[i + 1];
     if (!tr) return;
     const [locSel, sceneSel] = tr.querySelectorAll('select');
-    if (row.location) locSel.value = row.location;
-    if (row.scene) sceneSel.value = row.scene;
+    if (row.locationId) locSel.value = row.locationId;
+    if (row.sceneId) sceneSel.value = row.sceneId;
   });
 }
 
@@ -266,7 +287,15 @@ async function suggestFromSlate(i) {
     const res = await fetch('/api/transcribe', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, relative_path: row.original_path}) });
     const data = await res.json();
     if (!res.ok) { transcriptEl.textContent = 'Error: ' + data.error; return; }
-    if (data.scene) row.scene = data.scene;
+    if (data.scene) {
+      row.scene = data.scene;
+      // Best-effort: if the transcribed scene matches an existing Scenes
+      // option exactly, capture its id too so we can link it in Airtable.
+      // Doesn't auto-pick when ambiguous (e.g. duplicate scene numbers) —
+      // leaves sceneId unset, just the text, for the human to confirm via dropdown.
+      const match = findOptionByLabel(options.scenes, data.scene);
+      row.sceneId = match ? match.id : '';
+    }
     if (data.shot) row.shot = data.shot;
     if (data.take) row.take = data.take;
     const sceneNote = data.scene_inferred ? ' (scene guessed — "scene" wasn\'t heard, double-check)' : '';
@@ -287,7 +316,9 @@ async function previewBatch() {
 
 async function confirmExecute(mode, containerId, renames) {
   const root = getRoot();
-  const res = await fetch('/api/execute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, mode, renames}) });
+  const body = { root, mode, renames };
+  if (mode === 'batch') body.rows = batchRows;  // carries locationId/sceneId for the Airtable link step
+  const res = await fetch('/api/execute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await res.json();
   const el = document.getElementById(containerId);
   if (!res.ok) { el.innerHTML += `<div class="error">${data.error}</div>`; return; }
@@ -298,6 +329,14 @@ async function confirmExecute(mode, containerId, renames) {
     html += `<div class="rename-line ${r.success ? '' : 'skipped'}">${r.message}</div>`;
   }
   html += `<p class="${successCount === data.results.length ? 'ok' : 'warning'}">${successCount}/${data.results.length} files renamed.</p>`;
+  if (data.airtable_sync && data.airtable_sync.length) {
+    html += '<p class="status-line">Airtable:</p>';
+    for (const s of data.airtable_sync) {
+      if (s.action === 'matched') html += `<div class="rename-line">${s.basename} → already logged, marked "Live logged"</div>`;
+      else if (s.action === 'created') html += `<div class="rename-line">${s.basename} → new row created, marked "Ingested"</div>`;
+      else html += `<div class="warning">⚠ ${s.basename} → Airtable sync failed: ${s.error}</div>`;
+    }
+  }
   html += '</div>';
   el.innerHTML = html;
 }

@@ -20,6 +20,7 @@ tool are built against these exactly.
 | `Logged At`          | Created time                           | Automatic. This is the chronological key used to match rows to files. |
 | `Logged By`          | Single line text                       | Optional — who tapped it in.                                          |
 | `Sync Sound`         | Checkbox                               | Not currently used by the tooling.                                    |
+| `Source`             | Single select (`Live logged`/`Ingested`) | Set by the DIT tool's web UI after a rename: `Live logged` if the AD already logged this take and the row existed, `Ingested` if the row was created after the fact from a renamed file with no prior log entry. |
 
 ## Naming source fields
 

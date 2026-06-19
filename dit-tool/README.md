@@ -83,20 +83,42 @@ chmod +x /opt/homebrew/bin/rename
 
 Open http://localhost:5050 in a browser **on the same machine** — this is
 a local-only server, nothing is exposed to the network. Type in the date
-folder path, click "Load folder", then use whichever mode tab fits the
-situation:
+folder path, click "Load folder", then **Batch / Slate scrub** — currently
+the only mode shown in the UI, since slate transcription turned out to
+cover the real workflow well enough that Live and Pull from Airtable
+aren't needed day-to-day:
 
-- **Live** — shows the most-recently-modified footage/audio file, pick
-  Location/Scene/Take from dropdowns (sourced from Airtable), preview,
-  confirm.
-- **Pull from Airtable** — fetches the day's logged takes and pairs them
-  to files in chronological order, same as CLI `pull`.
 - **Batch / Slate scrub** — loads every file in `Footage`/`Audio` into an
   editable table. Each row has a "Suggest from slate" button (see below).
+  Pick Location/Scene from the dropdowns (sourced from Airtable) so the
+  Airtable-link step below has a record to link to.
 
-`AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` are optional if you only need
-`batch`/slate-scrub on a day with no Airtable logging — the Location/Scene
-dropdowns just won't populate.
+`Live` and `Pull from Airtable` (the same logic as CLI `pull`) are still
+fully implemented underneath — routes, JS functions, everything — just not
+exposed as tabs. To bring a tab back, uncomment its `<button>` in the
+`.mode-tabs` div in `webapp/templates/index.html` (see the HTML comment
+there for exactly which lines).
+
+`AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` are optional if you only need to
+rename files with no Airtable involvement at all — the Location/Scene
+dropdowns and the Airtable-link step (below) just won't run.
+
+## Linking renamed files back to Airtable
+
+After a batch confirm, for each renamed take the web UI checks the
+`Footage` table for a row whose `Name` already matches the new filename:
+
+- **Already exists** (the AD logged it live) — only the `Source` field is
+  updated, to `Live logged`. Nothing else on that row is touched.
+- **Doesn't exist yet** (never logged, only ingested after the fact) — a
+  new row is created with whatever's available (`Name`, `Date`, the
+  selected `Physical Locations`/`Scene` links, `Shot`, `Take`) and
+  `Source` set to `Ingested`.
+
+This runs once per unique take (footage + its matching audio share one
+row, same as live logging), right after the actual file rename succeeds.
+If Airtable isn't configured, this step is silently skipped — files still
+get renamed locally either way.
 
 ## Slate transcription ("Suggest from slate")
 

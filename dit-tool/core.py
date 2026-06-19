@@ -152,7 +152,9 @@ def batch_template_rows(root: Path):
 def write_batch_csv(root: Path, rows):
     csv_path = root / BATCH_CSV_FILENAME
     with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["original_path", "location", "scene", "shot", "take"])
+        writer = csv.DictWriter(
+            f, fieldnames=["original_path", "location", "scene", "shot", "take"], extrasaction="ignore"
+        )
         writer.writeheader()
         writer.writerows(rows)
     return csv_path
@@ -269,3 +271,82 @@ def pull_preview(root: Path, api_key, base_id, table_name="Footage"):
             renames.append((f, f.parent / f"{basename}{f.suffix.lower()}"))
 
     return renames, warnings, len(records)
+
+
+# ---------------------------------------------------------------------------
+# Airtable sync — link a renamed file back to a Footage row after the fact
+# ---------------------------------------------------------------------------
+
+def _escape_formula_string(value: str) -> str:
+    return value.replace("'", "\\'")
+
+
+def airtable_post(table, fields, api_key, base_id, typecast=True):
+    url = f"https://api.airtable.com/v0/{base_id}/{urllib.parse.quote(table)}"
+    body = json.dumps({"fields": fields, "typecast": typecast}).encode()
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RenameToolError(f"Airtable create failed ({e.code}): {e.read().decode()}")
+
+
+def airtable_patch(table, record_id, fields, api_key, base_id, typecast=True):
+    url = f"https://api.airtable.com/v0/{base_id}/{urllib.parse.quote(table)}/{record_id}"
+    body = json.dumps({"fields": fields, "typecast": typecast}).encode()
+    req = urllib.request.Request(
+        url, data=body, method="PATCH",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RenameToolError(f"Airtable update failed ({e.code}): {e.read().decode()}")
+
+
+def find_record_by_name(basename, api_key, base_id, table_name="Footage"):
+    params = {"filterByFormula": f"{{Name}} = '{_escape_formula_string(basename)}'", "maxRecords": "1"}
+    data = airtable_get(table_name, params, api_key, base_id)
+    records = data.get("records", [])
+    return records[0] if records else None
+
+
+def sync_take_to_airtable(basename, date_iso, location_id, scene_id, shot, take,
+                           api_key, base_id, table_name="Footage"):
+    """Looks up `basename` in the Footage table by Name. If it already
+    exists (i.e. the AD live-logged this take), marks Source = 'Live
+    logged'. If it doesn't exist (this take was never logged, only
+    ingested/renamed after the fact), creates a new row with whatever
+    info is available and Source = 'Ingested'.
+
+    Returns a dict: {basename, action: 'matched'|'created'|'skipped', record_id, error?}
+    """
+    if not api_key or not base_id:
+        return {"basename": basename, "action": "skipped", "error": "Airtable not configured"}
+
+    try:
+        existing = find_record_by_name(basename, api_key, base_id, table_name)
+        if existing:
+            airtable_patch(table_name, existing["id"], {"Source": "Live logged"}, api_key, base_id)
+            return {"basename": basename, "action": "matched", "record_id": existing["id"]}
+
+        fields = {"Name": basename, "Source": "Ingested"}
+        if date_iso:
+            fields["Date"] = date_iso
+        if location_id:
+            fields["Physical Locations"] = [location_id]
+        if scene_id:
+            fields["Scene"] = [scene_id]
+        if shot:
+            fields["Shot"] = str(shot)
+        if take:
+            fields["Take"] = int(take)
+        created = airtable_post(table_name, fields, api_key, base_id)
+        return {"basename": basename, "action": "created", "record_id": created["id"]}
+    except RenameToolError as e:
+        return {"basename": basename, "action": "error", "error": str(e)}
