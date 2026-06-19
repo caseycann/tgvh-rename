@@ -4,23 +4,40 @@ const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY!;
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID!;
 const AIRTABLE_TABLE_NAME = process.env.AIRTABLE_TABLE_NAME ?? "Footage";
 
+function pad(value: string | number): string {
+  const s = String(value);
+  return /^\d+$/.test(s) ? s.padStart(2, "0") : s;
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { date, location, scene, shot, take, flaggedTake, status, notes, loggedBy } = body;
+  const {
+    date,
+    locationId,
+    locationLabel,
+    sceneId,
+    sceneLabel,
+    shot,
+    take,
+    flaggedTake,
+    status,
+    notes,
+    loggedBy,
+  } = body;
 
-  if (!date || !location || !scene || !shot || !take) {
+  if (!date || !locationId || !sceneId || !shot || !take) {
     return NextResponse.json(
-      { error: "date, location, scene, shot, and take are required" },
+      { error: "date, locationId, sceneId, shot, and take are required" },
       { status: 400 }
     );
   }
 
   const fields: Record<string, unknown> = {
-    Name: `${location}_${scene}_${shot}_${String(take).padStart(2, "0")}`,
+    Name: `${locationLabel}_${pad(sceneLabel)}_${pad(shot)}_${pad(take)}`,
     Date: date,
-    Location: location,
-    Scene: scene,
-    Shot: shot,
+    "Physical Locations": [locationId],
+    Scene: [sceneId],
+    Shot: String(shot),
     Take: Number(take),
   };
   if (flaggedTake) fields["Flagged Take"] = true;
@@ -36,7 +53,9 @@ export async function POST(req: NextRequest) {
         Authorization: `Bearer ${AIRTABLE_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ fields }),
+      // typecast lets a Shot number not yet in the single-select's choice list
+      // still get written (Airtable adds it as a new choice) instead of erroring.
+      body: JSON.stringify({ fields, typecast: true }),
     }
   );
 

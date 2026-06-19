@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 
+type Option = { id: string; label: string };
+
 type RecentTake = {
   id: string;
-  Date?: string;
-  Location?: string;
-  Scene?: string;
+  Name?: string;
+  "Physical Locations"?: string[];
+  Scene?: string[];
   Shot?: string;
   Take?: number;
   "Flagged Take"?: boolean;
@@ -21,9 +23,11 @@ function todayLocal(): string {
 
 export default function Page() {
   const [date, setDate] = useState(todayLocal());
-  const [location, setLocation] = useState("");
-  const [scene, setScene] = useState("");
-  const [shot, setShot] = useState("");
+  const [locations, setLocations] = useState<Option[]>([]);
+  const [scenes, setScenes] = useState<Option[]>([]);
+  const [locationId, setLocationId] = useState("");
+  const [sceneId, setSceneId] = useState("");
+  const [shot, setShot] = useState("1");
   const [take, setTake] = useState("1");
   const [flaggedTake, setFlaggedTake] = useState(false);
   const [status, setStatus] = useState("");
@@ -33,6 +37,19 @@ export default function Page() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [recent, setRecent] = useState<RecentTake[]>([]);
+
+  async function loadOptions() {
+    try {
+      const res = await fetch("/api/options");
+      const data = await res.json();
+      if (res.ok) {
+        setLocations(data.locations ?? []);
+        setScenes(data.scenes ?? []);
+      }
+    } catch {
+      // best-effort, ignore
+    }
+  }
 
   async function loadRecent() {
     try {
@@ -45,32 +62,40 @@ export default function Page() {
   }
 
   useEffect(() => {
+    loadOptions();
     loadRecent();
   }, []);
 
   // Auto-suggest next take number when location/scene/shot match the most recent matching entry.
   useEffect(() => {
-    if (!location || !scene || !shot) return;
+    if (!locationId || !sceneId || !shot) return;
     const match = recent.find(
-      (r) => r.Location === location && r.Scene === scene && r.Shot === shot
+      (r) =>
+        (r["Physical Locations"] ?? []).includes(locationId) &&
+        (r.Scene ?? []).includes(sceneId) &&
+        r.Shot === shot
     );
     if (match && typeof match.Take === "number") {
       setTake(String(match.Take + 1));
     }
-  }, [location, scene, shot, recent]);
+  }, [locationId, sceneId, shot, recent]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setMessage(null);
     try {
+      const locationLabel = locations.find((l) => l.id === locationId)?.label ?? "";
+      const sceneLabel = scenes.find((s) => s.id === sceneId)?.label ?? "";
       const res = await fetch("/api/log-take", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           date,
-          location,
-          scene,
+          locationId,
+          locationLabel,
+          sceneId,
+          sceneLabel,
           shot,
           take,
           flaggedTake,
@@ -83,7 +108,7 @@ export default function Page() {
       if (!res.ok) {
         setMessage({ text: data.error ?? "Failed to log take", ok: false });
       } else {
-        setMessage({ text: `Logged ${location}_${scene}_${shot}_${String(take).padStart(2, "0")}`, ok: true });
+        setMessage({ text: `Logged ${data.fields?.Name ?? ""}`, ok: true });
         setNotes("");
         setStatus("");
         setFlaggedTake(false);
@@ -110,33 +135,40 @@ export default function Page() {
 
         <label>
           Location
-          <input
-            type="text"
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            placeholder="Grange"
-            required
-          />
+          <select value={locationId} onChange={(e) => setLocationId(e.target.value)} required>
+            <option value="" disabled>
+              Select location…
+            </option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          Scene
+          <select value={sceneId} onChange={(e) => setSceneId(e.target.value)} required>
+            <option value="" disabled>
+              Select scene…
+            </option>
+            {scenes.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
         </label>
 
         <div className="row">
           <label>
-            Scene
-            <input
-              type="text"
-              value={scene}
-              onChange={(e) => setScene(e.target.value)}
-              placeholder="23"
-              required
-            />
-          </label>
-          <label>
             Shot
             <input
-              type="text"
+              type="number"
+              min="1"
               value={shot}
               onChange={(e) => setShot(e.target.value)}
-              placeholder="04"
               required
             />
           </label>
@@ -206,7 +238,7 @@ export default function Page() {
           {recent.map((r) => (
             <li key={r.id}>
               <span>
-                {r.Location}_{r.Scene}_{r.Shot}_{String(r.Take).padStart(2, "0")}
+                {r.Name}
                 {r["Flagged Take"] ? <span className="flag"> ★</span> : null}
               </span>
               <span>{r.Status ?? ""}</span>

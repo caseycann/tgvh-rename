@@ -276,14 +276,10 @@ def cmd_pull(args):
             )
         for f, record in pairs:
             fields = record.get("fields", {})
-            location = fields.get("Location", "")
-            scene = fields.get("Scene", "")
-            shot = fields.get("Shot", "")
-            take = fields.get("Take", "")
-            if not (location and scene and shot and take):
-                print(f"  WARNING: incomplete Airtable row, skipping: {fields}")
+            basename = fields.get("Name", "")
+            if not basename:
+                print(f"  WARNING: row has no Name field, skipping (record {record.get('id')})")
                 continue
-            basename = build_basename(location, scene, shot, take)
             renames.append((f, f.parent / f"{basename}{f.suffix.lower()}"))
 
     if preview_and_confirm(renames):

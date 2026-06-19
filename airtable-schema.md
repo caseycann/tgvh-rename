@@ -1,22 +1,44 @@
 # Airtable Schema — `Footage` Table
 
-This is already built in the production base (`appwlYDQ4ihdowH9E`) as the
-`Footage` table. Field names below are the actual field names in that table —
-the logger and DIT tool are built against these exactly.
+This is built in the production base (`appwlYDQ4ihdowH9E`) as the `Footage`
+table, and links out to the existing `Physical Locations` and `Scenes`
+tables. Field names below are the actual field names — the logger and DIT
+tool are built against these exactly.
 
-| Field Name     | Type                                   | Notes                                                                 |
-|----------------|-----------------------------------------|------------------------------------------------------------------------|
-| `Name`         | Single line text                       | Primary field. Not used by the tooling; Airtable requires a primary field. |
-| `Date`         | Date                                    | Shoot day. Used to scope which rows `pull` fetches.                   |
-| `Location`     | Single line text                       | e.g. `Grange`                                                         |
-| `Scene`        | Single line text                       | Text, not number — scene numbers can be `23A`, `64`, etc.             |
-| `Shot`         | Single line text                       | Same reasoning as Scene.                                               |
-| `Take`         | Number (integer)                       |                                                                          |
-| `Flagged Take` | Checkbox                               | Optional. Flags a good take for the editor.                           |
-| `Status`       | Single select (`Good`/`No good`/`Exceptional`) | Optional triage info.                                          |
-| `Notes`        | Long text                              | Free text from the slate or AD.                                       |
-| `Logged At`    | Created time                           | Automatic. This is the chronological key used to match rows to files. |
-| `Logged By`    | Single line text                       | Optional — who tapped it in.                                          |
+| Field Name          | Type                                    | Notes                                                                 |
+|----------------------|------------------------------------------|------------------------------------------------------------------------|
+| `Name`               | Single line text                       | Primary field. Composed by the logger app as `Location_Scene_Shot_Take` at write time — not auto-computed by Airtable. |
+| `Date`               | Date                                    | Shoot day. Used to scope which rows `pull` fetches.                   |
+| `Physical Locations` | Link to another record (`Physical Locations`) | What the logger writes to. Pick the location actually shot at.   |
+| `Location`           | Lookup (`Nickname` from `Physical Locations`) | Read-only, Airtable-computed. This is what's used for the filename — the `Nickname` field on `Physical Locations` is a no-space slug (e.g. `Grange`), unlike `Name` which is a full prose name. |
+| `Scene`              | Link to another record (`Scenes`)      | Pick the scene from the existing list rather than typing it in.       |
+| `Shot`               | Single select                          | Predefined choices (`1`–`30` currently). The logger sends `typecast: true` so a new shot number still gets written even if it's not yet a defined choice. |
+| `Take`               | Number (integer)                       |                                                                          |
+| `Flagged Take`       | Checkbox                               | Optional. Flags a good take for the editor.                           |
+| `Status`             | Single select (`Good`/`No good`/`Exceptional`) | Optional triage info.                                          |
+| `Notes`              | Long text                              | Free text from the slate or AD.                                       |
+| `Logged At`          | Created time                           | Automatic. This is the chronological key used to match rows to files. |
+| `Logged By`          | Single line text                       | Optional — who tapped it in.                                          |
+| `Sync Sound`         | Checkbox                               | Not currently used by the tooling.                                    |
+
+## Naming source fields
+
+The logger composes `Name` (and the DIT tool's `pull` mode composes the
+renamed filename) from:
+
+- **Location** → the `Nickname` field on the linked `Physical Locations`
+  record (e.g. `Grange`), not the full `Name` field — fetched via the
+  `Physical Locations` dropdown in the logger, which shows Nickname (or Name
+  as a fallback if a location has no Nickname set yet).
+- **Scene** → the `Scenes` table's `Scene Number` field, with a leading
+  `"SCENE "` prefix stripped (real data looks like `"SCENE 23"`, `"SCENE
+  55b"` — the tooling strips the prefix and keeps `23`, `55b`).
+- **Shot** → the single-select value as typed/selected (e.g. `4`).
+- **Take** → the take number.
+
+All four are zero-padded to 2 digits when numeric for the final filename
+(`Grange_23_04_01.mxf`), matching the original naming convention — Scene
+codes with letters (like `55b`) are left as-is.
 
 ## Why `Logged At` matters
 
@@ -29,12 +51,12 @@ reliable.
 
 ## API access
 
-You'll need two Airtable Personal Access Tokens (https://airtable.com/create/tokens):
+You'll need an Airtable Personal Access Token (https://airtable.com/create/tokens)
+with, at minimum:
 
-- **Write token** (`data.records:write` on the base) — used by the logger's
-  serverless API route, set as `AIRTABLE_API_KEY` in Vercel.
-- **Read token** (`data.records:read` on the base) — used by the DIT tool's
-  `pull` mode, can be the same token if you don't want to manage two.
+- `data.records:read` and `data.records:write` on the base — for the logger
+  (writes to `Footage`, reads from `Physical Locations`/`Scenes` to populate
+  dropdowns) and for the DIT tool's `pull` mode (reads `Footage`).
 
-Also note your **Base ID** (starts with `app...`, found in the API docs for
-your base) — needed by both the logger and the DIT tool.
+Also note your **Base ID** (starts with `app...`) — needed by both the
+logger and the DIT tool.
