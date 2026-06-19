@@ -65,6 +65,48 @@ def transcribe_snippet(wav_path: Path) -> str:
     return " ".join(seg.text.strip() for seg in segments).strip()
 
 
+_ONES = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+}
+_TENS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+_NUMBER_WORDS = {**_ONES, **_TENS}
+
+
+def _normalize_spoken_numbers(text: str) -> str:
+    """Whisper inconsistently converts spelled-out numbers to digits —
+    'shot four' sometimes stays as words instead of becoming 'shot 4'. This
+    rewrites any number word/compound (e.g. 'twenty three') into digits so
+    parsing doesn't silently miss those fields."""
+    tokens = text.split(" ")
+    out = []
+    i = 0
+    while i < len(tokens):
+        raw = tokens[i]
+        core_word = re.sub(r"[^A-Za-z]", "", raw).lower()
+        trailing = re.sub(r"^[A-Za-z]*", "", raw)
+        if core_word in _NUMBER_WORDS:
+            value = _NUMBER_WORDS[core_word]
+            consumed = 1
+            if core_word in _TENS and i + 1 < len(tokens):
+                next_core = re.sub(r"[^A-Za-z]", "", tokens[i + 1]).lower()
+                if next_core in _ONES:
+                    value += _ONES[next_core]
+                    consumed = 2
+                    trailing = re.sub(r"^[A-Za-z]*", "", tokens[i + 1])
+            out.append(str(value) + trailing)
+            i += consumed
+        else:
+            out.append(raw)
+            i += 1
+    return " ".join(out)
+
+
 def _normalize_digit_group(raw: str) -> str:
     """'2-3' or '2 3' (digit-by-digit slate call) -> '23'. Leaves '55b', '23' as-is."""
     raw = raw.strip()
@@ -77,19 +119,33 @@ def _normalize_digit_group(raw: str) -> str:
 def parse_slate(text: str) -> dict:
     """Best-effort extraction of scene/shot/take from a transcript. Any field
     not found is None — caller should treat this as a suggestion, not fact."""
-    result = {"scene": None, "shot": None, "take": None, "raw_transcript": text}
+    normalized = _normalize_spoken_numbers(text)
+    result = {
+        "scene": None, "shot": None, "take": None,
+        "scene_inferred": False, "raw_transcript": text,
+    }
 
-    scene_match = re.search(r"scene\s*[:#-]?\s*([0-9]+(?:[\s-]+[0-9])*[a-z]?)", text, re.IGNORECASE)
+    scene_match = re.search(r"scene\s*[:#-]?\s*([0-9]+(?:[\s-]+[0-9])*[a-z]?)", normalized, re.IGNORECASE)
     if scene_match:
         result["scene"] = _normalize_digit_group(scene_match.group(1))
 
-    shot_match = re.search(r"shot\s*[:#-]?\s*([0-9]+(?:[\s-]+[0-9])*[a-z]?)", text, re.IGNORECASE)
+    shot_match = re.search(r"shot\s*[:#-]?\s*([0-9]+(?:[\s-]+[0-9])*[a-z]?)", normalized, re.IGNORECASE)
     if shot_match:
         result["shot"] = _normalize_digit_group(shot_match.group(1))
 
-    take_match = re.search(r"take\s*[:#-]?\s*([0-9]+(?:[\s-]+[0-9])*[a-z]?)", text, re.IGNORECASE)
+    take_match = re.search(r"take\s*[:#-]?\s*([0-9]+(?:[\s-]+[0-9])*[a-z]?)", normalized, re.IGNORECASE)
     if take_match:
         result["take"] = _normalize_digit_group(take_match.group(1))
+
+    # Sometimes the word "scene" itself gets dropped/mumbled in transcription
+    # but the number is still there at the very start, immediately ahead of
+    # "shot"/"take" — fall back to treating a leading bare number as the
+    # scene guess, flagged as inferred so the UI can show it's less certain.
+    if result["scene"] is None:
+        leading_match = re.match(r"^\s*([0-9]+[a-z]?)\b", normalized)
+        if leading_match and re.search(r"\b(shot|take)\b", normalized, re.IGNORECASE):
+            result["scene"] = leading_match.group(1)
+            result["scene_inferred"] = True
 
     return result
 

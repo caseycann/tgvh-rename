@@ -263,7 +263,8 @@ async function suggestFromSlate(i) {
     if (data.scene) row.scene = data.scene;
     if (data.shot) row.shot = data.shot;
     if (data.take) row.take = data.take;
-    transcriptEl.textContent = `Heard: "${data.raw_transcript}"`;
+    const sceneNote = data.scene_inferred ? ' (scene guessed — "scene" wasn\'t heard, double-check)' : '';
+    transcriptEl.textContent = `Heard: "${data.raw_transcript}"${sceneNote}`;
     renderBatchTable();
   } catch (e) {
     transcriptEl.textContent = 'Error: ' + e;

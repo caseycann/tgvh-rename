@@ -23,7 +23,7 @@ from pathlib import Path
 
 SUPPORTED_EXTENSIONS = {
     ".mxf", ".mov", ".mp4", ".r3d", ".braw", ".ari",
-    ".wav", ".bwf",
+    ".wav", ".bwf", ".m4a", ".aac", ".caf", ".mp3",
 }
 
 LOG_FILENAME = "rename_log.csv"
