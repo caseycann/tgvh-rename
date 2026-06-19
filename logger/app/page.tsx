@@ -12,6 +12,7 @@ type RecentTake = {
   Shot?: string;
   Take?: number;
   "Flagged Take"?: boolean;
+  "Sync Sound"?: boolean;
   Status?: string;
 };
 
@@ -30,6 +31,7 @@ export default function Page() {
   const [shot, setShot] = useState("1");
   const [take, setTake] = useState("1");
   const [flaggedTake, setFlaggedTake] = useState(false);
+  const [syncSound, setSyncSound] = useState(false);
   const [status, setStatus] = useState("");
   const [notes, setNotes] = useState("");
   const [loggedBy, setLoggedBy] = useState("");
@@ -99,6 +101,7 @@ export default function Page() {
           shot,
           take,
           flaggedTake,
+          syncSound,
           status: status || undefined,
           notes: notes || undefined,
           loggedBy: loggedBy || undefined,
@@ -191,6 +194,15 @@ export default function Page() {
             onChange={(e) => setFlaggedTake(e.target.checked)}
           />
           Flagged take (circle this one)
+        </label>
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={syncSound}
+            onChange={(e) => setSyncSound(e.target.checked)}
+          />
+          Sync sound
         </label>
 
         <label>

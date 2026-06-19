@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     shot,
     take,
     flaggedTake,
+    syncSound,
     status,
     notes,
     loggedBy,
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
     Take: Number(take),
   };
   if (flaggedTake) fields["Flagged Take"] = true;
+  if (syncSound) fields["Sync Sound"] = true;
   if (status) fields["Status"] = status;
   if (notes) fields["Notes"] = notes;
   if (loggedBy) fields["Logged By"] = loggedBy;
