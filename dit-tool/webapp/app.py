@@ -233,35 +233,23 @@ def execute_route():
         except core.RenameToolError:
             date_iso = None
 
-        # Group successful renames by basename — footage and audio of the
-        # same take share one basename and must resolve to a single sync
-        # call, tracking whether both media types are actually present so
-        # we know whether to check Sync Sound.
-        grouped = {}
+        seen_basenames = set()
         for original, new, success, _message in results:
             if not success:
                 continue
             basename = new.stem
-            entry = grouped.setdefault(basename, {"has_footage": False, "has_audio": False, "row": None})
-            media_folder = original.parent.name
-            if media_folder == "Footage":
-                entry["has_footage"] = True
-            elif media_folder == "Audio":
-                entry["has_audio"] = True
-            if entry["row"] is None:
-                entry["row"] = rows_by_original.get(str(original.relative_to(root)))
+            if basename in seen_basenames:
+                continue
+            seen_basenames.add(basename)
 
-        for basename, entry in grouped.items():
-            row = entry["row"] or {}
-            sync_sound = entry["has_footage"] and entry["has_audio"]
+            row = rows_by_original.get(str(original.relative_to(root)))
             sync_result = core.sync_take_to_airtable(
                 basename,
                 date_iso,
-                row.get("locationId"),
-                row.get("sceneId"),
-                row.get("shot"),
-                row.get("take"),
-                sync_sound,
+                (row or {}).get("locationId"),
+                (row or {}).get("sceneId"),
+                (row or {}).get("shot"),
+                (row or {}).get("take"),
                 AIRTABLE_API_KEY,
                 AIRTABLE_BASE_ID,
                 AIRTABLE_TABLE_NAME,
