@@ -54,6 +54,33 @@ source .venv/bin/activate
 AIRTABLE_API_KEY=pat... AIRTABLE_BASE_ID=app... python3 webapp/app.py
 ```
 
+On this machine, this is also wired up as a plain shell command — just run:
+
+```bash
+rename
+```
+
+That's a wrapper script at `/opt/homebrew/bin/rename` which `cd`s into this
+folder, activates `.venv`, loads `dit-tool/.env` (Airtable credentials —
+gitignored, not in the repo) for you, and starts the server. It's
+machine-specific (hardcodes this checkout's path), so it won't follow the
+repo if cloned elsewhere — re-create it there if needed:
+
+```bash
+cat > /opt/homebrew/bin/rename <<'EOF'
+#!/bin/bash
+set -e
+DIT_TOOL_DIR="/absolute/path/to/tgvh-rename/dit-tool"
+if [ -f "$DIT_TOOL_DIR/.env" ]; then
+  set -a; source "$DIT_TOOL_DIR/.env"; set +a
+fi
+source "$DIT_TOOL_DIR/.venv/bin/activate"
+cd "$DIT_TOOL_DIR"
+exec python3 webapp/app.py "$@"
+EOF
+chmod +x /opt/homebrew/bin/rename
+```
+
 Open http://localhost:5050 in a browser **on the same machine** — this is
 a local-only server, nothing is exposed to the network. Type in the date
 folder path, click "Load folder", then use whichever mode tab fits the
