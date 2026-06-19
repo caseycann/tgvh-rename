@@ -334,6 +334,7 @@ async function confirmExecute(mode, containerId, renames) {
     for (const s of data.airtable_sync) {
       if (s.action === 'matched') html += `<div class="rename-line">${s.basename} → already logged, marked "Live logged"</div>`;
       else if (s.action === 'created') html += `<div class="rename-line">${s.basename} → new row created, marked "Ingested"</div>`;
+      else if (s.action === 'duplicate') html += `<div class="warning">⚠ ${s.basename} → ${s.record_ids.length} existing Airtable rows already share this name — this predates the rename, resolve manually in Airtable, nothing was changed</div>`;
       else html += `<div class="warning">⚠ ${s.basename} → Airtable sync failed: ${s.error}</div>`;
     }
   }
