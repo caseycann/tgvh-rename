@@ -96,6 +96,7 @@
       <button onclick="loadBatch()">Load files</button>
     </div>
     <div id="batchTableWrap"></div>
+    <div id="batchResult"></div>
   </section>
 </main>
 
@@ -165,7 +166,7 @@ async function refreshLiveContext() {
   } catch (e) { el.textContent = String(e); }
 }
 
-function renderRenameList(containerId, renames, warnings, onConfirm) {
+function renderRenameList(containerId, renames, warnings, mode) {
   const el = document.getElementById(containerId);
   let html = '';
   for (const w of (warnings || [])) html += `<div class="warning">⚠ ${w}</div>`;
@@ -178,9 +179,15 @@ function renderRenameList(containerId, renames, warnings, onConfirm) {
   for (const r of renames) {
     html += `<div class="rename-line">${r.original.split('/').pop()} &rarr; ${r.new_name}</div>`;
   }
-  html += `<button id="confirmBtn-${containerId}" onclick="(${onConfirm})()">Confirm &amp; rename</button>`;
+  html += `<button type="button" id="confirmBtn-${containerId}">Confirm &amp; rename</button>`;
   html += '</div>';
   el.innerHTML = html;
+  // Attached via JS (not an inline onclick string) so we don't have to
+  // serialize the renames array — and don't risk quote-escaping bugs in
+  // a hand-built HTML attribute.
+  document.getElementById(`confirmBtn-${containerId}`).addEventListener('click', () => {
+    confirmExecute(mode, containerId, renames);
+  });
 }
 
 async function previewLive() {
@@ -195,8 +202,7 @@ async function previewLive() {
   const res = await fetch('/api/live/preview', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, location, scene, shot, take}) });
   const data = await res.json();
   if (!res.ok) { document.getElementById('liveResult').innerHTML = `<div class="error">${data.error}</div>`; return; }
-  window._liveRenames = data.renames;
-  renderRenameList('liveResult', data.renames, data.notes, 'confirmExecute("live", "liveResult", window._liveRenames)');
+  renderRenameList('liveResult', data.renames, data.notes, 'live');
 }
 
 async function previewPull() {
@@ -204,9 +210,8 @@ async function previewPull() {
   const res = await fetch('/api/pull/preview', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root}) });
   const data = await res.json();
   if (!res.ok) { document.getElementById('pullResult').innerHTML = `<div class="error">${data.error}</div>`; return; }
-  window._pullRenames = data.renames;
   const warnings = [`Found ${data.take_count} logged take(s).`, ...data.warnings];
-  renderRenameList('pullResult', data.renames, warnings, 'confirmExecute("pull", "pullResult", window._pullRenames)');
+  renderRenameList('pullResult', data.renames, warnings, 'pull');
 }
 
 let batchRows = [];
@@ -217,6 +222,7 @@ async function loadBatch() {
   const data = await res.json();
   if (!res.ok) { document.getElementById('batchTableWrap').innerHTML = `<div class="error">${data.error}</div>`; return; }
   batchRows = data.rows;
+  document.getElementById('batchResult').innerHTML = '';
   renderBatchTable();
 }
 
@@ -276,11 +282,7 @@ async function previewBatch() {
   const res = await fetch('/api/batch/preview', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, rows: batchRows}) });
   const data = await res.json();
   if (!res.ok) { document.getElementById('batchTableWrap').innerHTML += `<div class="error">${data.error}</div>`; return; }
-  window._batchRenames = data.renames;
-  const resultEl = document.createElement('div');
-  resultEl.id = 'batchResult';
-  document.getElementById('batchTableWrap').appendChild(resultEl);
-  renderRenameList('batchResult', data.renames, data.warnings, 'confirmExecute("batch", "batchResult", window._batchRenames)');
+  renderRenameList('batchResult', data.renames, data.warnings, 'batch');
 }
 
 async function confirmExecute(mode, containerId, renames) {
