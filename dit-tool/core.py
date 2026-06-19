@@ -309,31 +309,54 @@ def airtable_patch(table, record_id, fields, api_key, base_id, typecast=True):
         raise RenameToolError(f"Airtable update failed ({e.code}): {e.read().decode()}")
 
 
-def find_record_by_name(basename, api_key, base_id, table_name="Footage"):
-    params = {"filterByFormula": f"{{Name}} = '{_escape_formula_string(basename)}'", "maxRecords": "1"}
+def find_records_by_name(basename, api_key, base_id, table_name="Footage"):
+    """Returns every record whose Name matches `basename` — usually 0 or 1,
+    but callers must check for >1 (pre-existing duplicate) rather than just
+    grabbing the first, since silently picking one would hide the problem."""
+    params = {"filterByFormula": f"{{Name}} = '{_escape_formula_string(basename)}'", "maxRecords": "10"}
     data = airtable_get(table_name, params, api_key, base_id)
-    records = data.get("records", [])
-    return records[0] if records else None
+    return data.get("records", [])
 
 
-def sync_take_to_airtable(basename, date_iso, location_id, scene_id, shot, take,
+def sync_take_to_airtable(basename, date_iso, location_id, scene_id, shot, take, sync_sound,
                            api_key, base_id, table_name="Footage"):
-    """Looks up `basename` in the Footage table by Name. If it already
-    exists (i.e. the AD live-logged this take), marks Source = 'Live
-    logged'. If it doesn't exist (this take was never logged, only
-    ingested/renamed after the fact), creates a new row with whatever
-    info is available and Source = 'Ingested'.
+    """Looks up `basename` in the Footage table by Name *before* making any
+    change, so any duplicate found here necessarily predates this rename —
+    this tool never creates two rows for the same take itself (footage and
+    audio of one take are deduped to a single sync call by the caller).
 
-    Returns a dict: {basename, action: 'matched'|'created'|'skipped', record_id, error?}
+    - 0 matches: creates a new row, Source = 'Ingested'.
+    - 1 match (AD already live-logged it): only sets Source = 'Live logged'
+      (plus Sync Sound, see below) — nothing else on that row is touched.
+    - >1 matches: a pre-existing duplicate. Does not touch any of them;
+      returns action='duplicate' so the caller can warn instead of guessing
+      which row is the "real" one.
+
+    `sync_sound`: True when both a footage file and an audio file were
+    renamed to this basename in this batch — checks the Sync Sound box.
+    Never explicitly unchecked, so a manually-set value elsewhere is never
+    clobbered when only one media type is present this run.
+
+    Returns: {basename, action: 'matched'|'created'|'duplicate'|'skipped'|'error', ...}
     """
     if not api_key or not base_id:
         return {"basename": basename, "action": "skipped", "error": "Airtable not configured"}
 
     try:
-        existing = find_record_by_name(basename, api_key, base_id, table_name)
-        if existing:
-            airtable_patch(table_name, existing["id"], {"Source": "Live logged"}, api_key, base_id)
-            return {"basename": basename, "action": "matched", "record_id": existing["id"]}
+        matches = find_records_by_name(basename, api_key, base_id, table_name)
+
+        if len(matches) > 1:
+            return {
+                "basename": basename, "action": "duplicate",
+                "record_ids": [m["id"] for m in matches],
+            }
+
+        if len(matches) == 1:
+            fields = {"Source": "Live logged"}
+            if sync_sound:
+                fields["Sync Sound"] = True
+            airtable_patch(table_name, matches[0]["id"], fields, api_key, base_id)
+            return {"basename": basename, "action": "matched", "record_id": matches[0]["id"]}
 
         fields = {"Name": basename, "Source": "Ingested"}
         if date_iso:
@@ -346,6 +369,8 @@ def sync_take_to_airtable(basename, date_iso, location_id, scene_id, shot, take,
             fields["Shot"] = str(shot)
         if take:
             fields["Take"] = int(take)
+        if sync_sound:
+            fields["Sync Sound"] = True
         created = airtable_post(table_name, fields, api_key, base_id)
         return {"basename": basename, "action": "created", "record_id": created["id"]}
     except RenameToolError as e:

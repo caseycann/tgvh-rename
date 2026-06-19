@@ -114,6 +114,18 @@ After a batch confirm, for each renamed take the web UI checks the
   new row is created with whatever's available (`Name`, `Date`, the
   selected `Physical Locations`/`Scene` links, `Shot`, `Take`) and
   `Source` set to `Ingested`.
+- **More than one existing row already shares that `Name`** — this can
+  only mean a duplicate already existed in Airtable before this rename
+  (the tool itself never creates two rows for one take — see below).
+  Nothing is touched on either row; the UI shows a warning instead of
+  guessing which one is "real". Resolve the duplicate manually in
+  Airtable, then re-run if you want it linked.
+
+`Sync Sound` gets checked automatically when **both** a footage file and
+an audio file were renamed to the same basename in this batch — that's
+good evidence the take has audio recorded in sync with the footage. It's
+never explicitly unchecked (e.g. for a footage-only/MOS take), so it
+won't clobber a value someone set deliberately elsewhere.
 
 This runs once per unique take (footage + its matching audio share one
 row, same as live logging), right after the actual file rename succeeds.
